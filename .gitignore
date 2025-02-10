@@ -1,1 +1,7 @@
 config/.env
+src/sat_analysis.egg-info
+venv
+.vscode
+log/*
+__pycache__/
+tests/__pycache__
