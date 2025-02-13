@@ -89,6 +89,7 @@ class SatPositionFetcher:
         return
 
     def add_sat_id(self, sat_id):
+        sat_id = int(sat_id)
         self.satid_collection.add(sat_id)
         try:
             self.update_single_sat(sat_id)
