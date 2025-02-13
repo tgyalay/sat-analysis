@@ -8,7 +8,7 @@ import logging
 from pprint import pformat
 from datetime import datetime
 from datetime import timezone
-from .types import Tle_Response, from_dict
+from .types import TleData, from_dict
 from typing import Dict
 
 import pyorbital.orbital
@@ -16,7 +16,7 @@ import pyorbital.orbital
 class SatDataFetcher:
     '''
     Handles sourcing of data from the N2YO API 
-    and returns it in a structured format
+    and returns the json response as a dictionary
     '''
     def __init__(self, api_key, transaction_limit = 1000, base_url = 'https://api.n2yo.com/rest/v1/satellite/'):
         self.api_key = api_key
@@ -24,10 +24,6 @@ class SatDataFetcher:
         self.logger = logging.getLogger(__name__+f'.{self.__class__.__name__}')
         self.logger.info('Sourcing object created')
         self.transaction_limit = transaction_limit
-    
-    def _generate_tle_data(self, satellite_id) -> 'Tle_Response':
-        response = self._fetch_tle_data(satellite_id)
-        return from_dict(Tle_Response, response)
 
     def _fetch_tle_data(self, satellite_id) -> dict:
         url = f'tle/{satellite_id}'
@@ -67,24 +63,30 @@ class SatDataFetcher:
 
 class SatPositionFetcher:
     '''
-    Uses the pyorbital library to get the position of a satellite
-    and the SatDataFetcher to get the TLE data for pyorbital
+    Custodian of the TLE data and the satellite IDs
+    Generates Position data for each satellite using the TLE data
     '''
     def __init__(self, api_key):
         self.data_fetcher = SatDataFetcher(api_key)
         self.satid_collection = set()
-        self.satid_to_tle = {int : Tle_Response}
-        self.satid_to_orbitals = {int : pyorbital.orbital.Orbital}
+        self.satid_to_tle = {int : TleData}
         self.logger = logging.getLogger(__name__+f'.{self.__class__.__name__}')
 
+    def get_positions_over_time(self, time_values : list[datetime]):
+        '''
+        Returns a dictionary of dictionaries of positiosn over time for each satellite
+        '''
+        positions = {}
+        for sat_id in self.satid_collection:
+            tle_data = self.satid_to_tle[sat_id]
+            positions[sat_id] = tle_data.get_positions_over_time(time_values)
+        return positions
+    
     #Single element updates
     def update_single_sat(self, sat_id : int):
-        self.satid_to_tle[sat_id] = self.data_fetcher._generate_tle_data(sat_id)
-        self.satid_to_orbitals[sat_id] = pyorbital.orbital.Orbital(
-            "None",
-            line1=self.satid_to_tle[sat_id].line1,
-            line2=self.satid_to_tle[sat_id].line2
-        )
+        response = self.data_fetcher._fetch_tle_data(sat_id)
+        self.satid_to_tle[sat_id] = from_dict(TleData, response)
+        return
 
     def add_sat_id(self, sat_id):
         self.satid_collection.add(sat_id)
@@ -94,8 +96,9 @@ class SatPositionFetcher:
             self.logger.error(
                 f'Error adding satellite ID {sat_id}:\n{e.with_traceback()}'
                 )
-            #remove the satellite ID from the collection
-            self.satid_collection.remove(sat_id)
+            #remove the satellite ID from the dictionary due to outdated data
+            self.satid_to_tle.pop(sat_id) if sat_id in self.satid_to_tle else None
+
             return
         self.logger.info(f'Satellite ID {sat_id} added with TLE data and orbital information')
 
@@ -117,16 +120,13 @@ class SatPositionFetcher:
                 
         logger_string = "All satellite IDs attempted update."
         if len(failed_ids) > 0:
-            logger_string += f' Failed IDs: {failed_ids}'
+            logger_string += f' Failed IDs:\n{pformat(failed_ids)}'
+        else:
+            logger_string += ' All IDs updated successfully.'
         self.logger.info(logger_string)
 
-    @staticmethod
-    def get_position(Tle_Response : 'Tle_Response', time = datetime.now(timezone.utc)):
-        orbiter = pyorbital.orbital.Orbital(
-            "None",
-            line1 = Tle_Response.line1,
-            line2 = Tle_Response.line2
-        )
-        return orbiter.get_lonlatalt(time)
-
-
+    def remove_sat_id(self, sat_id):
+        if sat_id in self.satid_collection:
+            self.satid_collection.remove(sat_id) 
+        if sat_id in self.satid_to_tle:
+            self.satid_to_tle.pop(sat_id) 

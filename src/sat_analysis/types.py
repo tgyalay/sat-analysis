@@ -1,6 +1,8 @@
 import dataclasses
 from typing import Type, TypeVar
 from datetime import datetime, timezone
+
+import pyorbital.orbital
 '''
 Dataclasses to enforce the schema on the API response
 '''
@@ -15,7 +17,7 @@ class Info():
         self.creation_time : datetime = datetime.now(timezone.utc)
 
 @dataclasses.dataclass
-class Tle_Response():
+class TleData():
     info: Info
     tle: str
 
@@ -25,6 +27,28 @@ class Tle_Response():
         lines_list = [line.strip() for line in lines_list]
         self.line1 = lines_list[0]
         self.line2 = lines_list[1]
+
+    def get_position(self, time = datetime.now(timezone.utc)):
+        orbiter = pyorbital.orbital.Orbital(
+            "None",
+            line1 = self.line1,
+            line2 = self.line2
+        )
+        calculated_pos = orbiter.get_lonlatalt(time)
+        #I have this as a dictionary to be easily able to map
+        # it to 3-D numpy array
+        position_dict = {
+            'longitude': calculated_pos[0],
+            'latitude': calculated_pos[1],
+            'altitude': calculated_pos[2]
+        }
+        return position_dict
+    
+    def get_positions_over_time(self, time_values : list[datetime]):
+        positions = {}
+        for time in time_values:
+            positions[time] = self.get_position(time)
+        return positions
 
 T = TypeVar('T')
 def from_dict(data_class: Type[T], data: dict) -> T:
